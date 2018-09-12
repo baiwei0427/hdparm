@@ -1,7 +1,7 @@
 CC ?= g++
 STRIP ?= strip
 
-CFLAGS := -O2 -W -Wall -Wbad-function-cast -Wcast-align -Wpointer-arith -Wcast-qual -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wmissing-declarations -fkeep-inline-functions -Wwrite-strings -Waggregate-return -Wnested-externs -Wtrigraphs $(CFLAGS)
+CFLAGS := -O2 -W -Wall $(CFLAGS)
 LDFLAGS = -s
 
 OBJS = my-hdparm.o libhdparm/fibmap.o libhdparm/geom.o libhdparm/sysfs.o
