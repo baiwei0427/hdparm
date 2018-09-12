@@ -7,6 +7,10 @@
 #define __attribute__(x)
 #endif
 
+#if defined (__cplusplus)
+extern "C" {
+#endif
+
 #define lba28_limit ((__u64)(1<<28) - 1)
 
 void identify (__u16 *id_supplied);
@@ -30,6 +34,7 @@ struct block_info {
 // Note that 'result' can store at most 'maxcount' entries.
 // '*count' stores # of fetched block entries.
 // It is possible that '*count' is larger than 'maxcount'.
+
 int my_do_filemap(const char *file_name, struct block_info *result, int maxcount, int *count);
 
 int do_fallocate_syscall (const char *name, __u64 bytecount);
@@ -106,3 +111,6 @@ enum {	/* ioctl() numbers */
 #endif
 #define BLKGETSIZE64 _IOR(0x12,114,__u64)
 
+#if defined (__cplusplus)
+}
+#endif
