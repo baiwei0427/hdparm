@@ -152,6 +152,92 @@ struct fs_s {
 
 #define FIEMAP	_IOWR('f', 11, struct fm_s)
 
+static int my_walk_fiemap(int fd, unsigned int sectors_per_block, __u64 start_lba,
+	                      struct block_info *result, int maxcount, int *count)
+{
+	int result_index = 0;
+	*count = 0;
+
+	unsigned int i, done = 0;
+	unsigned int blksize = sectors_per_block * sector_bytes;
+	struct fs_s fs;
+
+	memset(&fs, 0, sizeof(fs));
+
+	//printf("%s\n", __FUNCTION__);
+
+	do {
+		fs.fm.length = ~0ULL;
+		fs.fm.flags  = 0;
+		fs.fm.extent_count = FE_COUNT;
+
+		if (-1 == ioctl(fd, FIEMAP, &fs)) {
+			int err = errno;
+			//perror("ioctl(FIEMAP)");
+			return err;
+		}
+
+		if (0) fprintf(stderr, "ioctl(FIEMAP) returned %llu extents\n", (__u64)fs.fm.mapped_extents);
+		if (!fs.fm.mapped_extents) {
+			done = 1;
+		} else {
+			struct file_extent ext;
+			memset(&ext, 0, sizeof(ext));
+			for (i = 0; i < fs.fm.mapped_extents; i++) {
+				__u64 phy_blk, ext_len;
+
+				ext.byte_offset = fs.fe[i].logical;
+				if (0) fprintf(stderr, "log=%llu phy=%llu len=%llu flags=0x%x\n", fs.fe[i].logical,
+						fs.fe[i].physical, fs.fe[i].length, fs.fe[i].flags);
+				if (fs.fe[i].flags & EXTENT_UNKNOWN) {
+					ext.first_block = 0;
+					ext.last_block  = 0;
+					ext.block_count = 0; /* FIEMAP returns garbage for this. Ugh. */
+				} else {
+					phy_blk = fs.fe[i].physical / blksize;
+					ext_len = fs.fe[i].length   / blksize;
+
+					ext.first_block = phy_blk;
+					ext.last_block  = phy_blk + ext_len - 1;
+					ext.block_count = ext_len;
+				}
+				//handle_extent(ext, sectors_per_block, start_lba);
+
+				// We have enough space to store the informatinon
+				if (result_index < maxcount) {	
+					if (ext.first_block) {
+						result[result_index].begin_lba = start_lba + (ext.first_block * sectors_per_block);
+						result[result_index].length = (ext.last_block + 1 - ext.first_block) * sectors_per_block * sector_bytes;	
+					} else {
+						result[result_index].begin_lba = 0;
+						result[result_index].length = 0;
+					}
+
+					result_index++;
+				}
+				*count = *count + 1;
+				
+				if (fs.fe[i].flags & FE_FLAG_LAST) {
+					/*
+					 * Hit an ext4 bug in 2.6.29.4, where some FIEMAP calls
+					 * had the LAST flag set in the final returned extent,
+					 * even though there were *plenty* more extents to be had
+					 * from continued FIEMAP calls.
+					 *
+					 * So, we'll ignore it here, and instead rely on getting
+					 * a zero count back from fs.fm.mapped_extents at the end.
+					 */
+					if (0) fprintf(stderr, "%s: ignoring LAST bit\n", __func__);
+					//done = 1;
+				}
+
+			}
+			fs.fm.start = (fs.fe[i-1].logical + fs.fe[i-1].length);
+		}
+	} while (!done);
+	return 0;
+}
+
 static int walk_fiemap (int fd, unsigned int sectors_per_block, __u64 start_lba)
 {
 	unsigned int i, done = 0;
@@ -159,6 +245,7 @@ static int walk_fiemap (int fd, unsigned int sectors_per_block, __u64 start_lba)
 	struct fs_s fs;
 
 	memset(&fs, 0, sizeof(fs));
+
 	do {
 		fs.fm.length = ~0ULL;
 		fs.fm.flags  = 0;
@@ -217,12 +304,81 @@ static int walk_fiemap (int fd, unsigned int sectors_per_block, __u64 start_lba)
 	return 0;
 }
 
+// Added by Wei
+int my_do_filemap(const char *file_name, struct block_info *result, int maxcount, int *count)
+{
+	int fd, err;
+	struct stat st;
+	__u64 start_lba = 0;
+	unsigned int sectors_per_block, blksize;
+
+	//printf("%s(%s)\n", __FUNCTION__, file_name);
+
+	if ((fd = open(file_name, O_RDONLY)) == -1) {
+		err = errno;
+		perror(file_name);
+		return err;
+	}
+	if (fstat(fd, &st) == -1) {
+		err = errno;
+		perror(file_name);
+		return err;
+	}
+	if (!S_ISREG(st.st_mode)) {
+		fprintf(stderr, "%s: not a regular file\n", file_name);
+		close(fd);
+		return EINVAL;
+	}
+
+	/*
+	 * Get the filesystem starting LBA:
+	 */
+	err = get_dev_t_geometry(st.st_dev, NULL, NULL, NULL, &start_lba, NULL);
+	if (err) {
+		close(fd);
+		return err;
+	}
+	if (start_lba == START_LBA_UNKNOWN) {
+		fprintf(stderr, "Unable to determine start offset LBA for device, aborting.\n");
+		close(fd);
+		return EIO;
+	}
+	if((err=ioctl(fd,FIGETBSZ,&blksize))){
+		fprintf(stderr, "Unable to determine block size, aborting.\n");
+		close(fd);
+		return err;
+	};
+	sectors_per_block = blksize / sector_bytes;
+	//printf("\n%s:\n filesystem blocksize %u, begins at LBA %llu;"
+	//       " assuming %u byte sectors.\n",
+	//       file_name, blksize, start_lba, sector_bytes);
+	//printf("%12s %10s %10s %10s\n", "byte_offset", "begin_LBA", "end_LBA", "sectors");
+
+	if (st.st_size == 0) {
+		struct file_extent ext;
+		memset(&ext, 0, sizeof(ext));
+		handle_extent(ext, sectors_per_block, start_lba);
+		close(fd);
+		return 0;
+	}
+
+	err = my_walk_fiemap(fd, sectors_per_block, start_lba, result, maxcount, count);
+
+	if (err)
+		err = walk_fibmap(fd, &st, sectors_per_block, start_lba);
+	close (fd);
+	return 0;
+}
+
 int do_filemap (const char *file_name)
 {
 	int fd, err;
 	struct stat st;
 	__u64 start_lba = 0;
 	unsigned int sectors_per_block, blksize;
+
+	printf("%s(%s)\n", __FUNCTION__, file_name);
+
 
 	if ((fd = open(file_name, O_RDONLY)) == -1) {
 		err = errno;

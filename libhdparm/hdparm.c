@@ -2593,10 +2593,11 @@ do_fibmap_file (const char *name)
 	int err;
 	char *path;
 
-	printf("%s\n", __FUNCTION__);
+	printf("%s(%s)\n", __FUNCTION__, name);
 
+	// Get file path
 	get_filename_parm(&path, name);
-	
+
 	if (num_flags_processed || argc)
 		usage_help(5,EINVAL);
 	err = do_filemap(path);

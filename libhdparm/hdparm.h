@@ -19,6 +19,19 @@ int sysfs_set_attr (int fd, const char *attr, const char *fmt, void *val_p, int 
 int get_dev_geometry (int fd, __u32 *cyls, __u32 *heads, __u32 *sects, __u64 *start_lba, __u64 *nsectors);
 int get_dev_t_geometry (dev_t dev, __u32 *cyls, __u32 *heads, __u32 *sects, __u64 *start_lba, __u64 *nsectors);
 int do_filemap(const char *file_name);
+
+struct block_info {
+	unsigned long begin_lba;	// begin logical block address (LBA) 
+	unsigned int length;		// segment length in bytes
+};
+
+// Added by Wei 
+// Given a 'file_name', 'result' stores block information of this file.
+// Note that 'result' can store at most 'maxcount' entries.
+// '*count' stores # of fetched block entries.
+// It is possible that '*count' is larger than 'maxcount'.
+int my_do_filemap(const char *file_name, struct block_info *result, int maxcount, int *count);
+
 int do_fallocate_syscall (const char *name, __u64 bytecount);
 int fwdownload(int fd, __u16 *id, const char *fwpath, int xfer_mode);
 void dco_identify_print (__u16 *dco);
